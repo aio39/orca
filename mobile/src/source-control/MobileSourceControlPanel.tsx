@@ -35,8 +35,9 @@ import { MOBILE_COMPLETE_MERGE_ACTION_ID } from './mobile-source-control-conflic
 import { isMobileConflictAborting } from './mobile-source-control-conflict-abort'
 import { useMobilePrSidebarController } from '../session/use-mobile-pr-sidebar-controller'
 import { prSidebarDetailsNeedFetch } from '../session/mobile-pr-sidebar-state'
-import { MobilePrViewPanelBody } from '../components/pr-sidebar/MobilePrViewPanel'
-import { openMobilePrUrl } from '../components/mobile-pr-url'
+import { MobilePrTabBody } from '../components/MobilePRSidebar'
+import { MobileSourceControlPrOverlays } from './MobileSourceControlPrOverlays'
+import { useMobileSourceControlPrTab } from './use-mobile-source-control-pr-tab'
 
 export type MobileSourceControlPanelProps = {
   hostId: string
@@ -89,12 +90,16 @@ export function MobileSourceControlPanel({
   }, [])
   const openHistoryTab = useCallback(() => selectTab('history'), [selectTab])
   const openPrTab = useCallback(() => selectTab('pr'), [selectTab])
+  // The PR tab owns the Create PR sheet; Changes-tab entry points reach it through this ref.
+  const openCreatePrRef = useRef<() => void>(() => {})
+  const openCreatePr = useCallback(() => openCreatePrRef.current(), [])
 
   const state = useMobileSourceControlState({
     hostId,
     worktreeId,
     name,
-    onOpenHistory: openHistoryTab
+    onOpenHistory: openHistoryTab,
+    onCreatePr: openCreatePr
   })
   const {
     client,
@@ -239,17 +244,23 @@ export function MobileSourceControlPanel({
     void refetchPr({ includeDetails: false })
   }, [activeTab, isHostedRepo, loadStatus, refetchPr])
 
+  const { prTab, prScreen, setPrScreen, prMenuGroups, branchCompare } = useMobileSourceControlPrTab(
+    {
+      state,
+      worktreeId,
+      prController,
+      prBranch,
+      prHeadSha,
+      ready,
+      selectTab,
+      onRefresh,
+      openCreatePrRef
+    }
+  )
+
   // Embedded close dismisses the dock; route Back pops. The dock column owns safe-area chrome.
   const onBack = () => router.back()
   const onClose = onRequestClose ?? (() => router.back())
-  const prWebUrl =
-    activeTab === 'pr' &&
-    prController.prSidebarState.kind === 'ready' &&
-    prController.prSidebarState.data.pr.url
-      ? prController.prSidebarState.data.pr.url
-      : null
-  const prWebNumber =
-    prController.prSidebarState.kind === 'ready' ? prController.prSidebarState.data.pr.number : null
   const header = (
     <MobileSourceControlHeader
       embedded={embedded}
@@ -258,8 +269,7 @@ export function MobileSourceControlPanel({
       onBack={onBack}
       onClose={onClose}
       onRefresh={onRefresh}
-      onOpenPrWeb={prWebUrl ? () => openMobilePrUrl(prWebUrl) : undefined}
-      prNumber={prWebNumber}
+      menuGroups={activeTab === 'pr' ? prMenuGroups : null}
       accessory={
         <MobileSegmentedControl
           segments={SOURCE_CONTROL_HUB_TABS.map((tab) => ({
@@ -365,18 +375,12 @@ export function MobileSourceControlPanel({
 
             {showPrBody ? (
               <View style={hubStyles.tabBody}>
-                <MobilePrViewPanelBody
-                  client={client}
-                  connState={connState}
-                  worktreeId={worktreeId}
-                  branch={prBranch}
-                  headSha={prHeadSha}
-                  gitStatus={status}
-                  isGithubRepo={isHostedRepo}
-                  // Mid-probe false is still loading; do not flash unavailable.
-                  branchContextLoaded={ready && prController.prSidebarRepoProbeLoaded}
-                  controller={prController}
-                  workspaceLabel={worktreeLabel}
+                <MobilePrTabBody
+                  tab={prTab}
+                  onRetry={prController.retryPRSidebar}
+                  bottomInset={insets.bottom}
+                  onOpenChanges={() => selectTab('changes')}
+                  branchCompare={branchCompare}
                 />
               </View>
             ) : activeTab === 'pr' ? (
@@ -410,6 +414,13 @@ export function MobileSourceControlPanel({
       </MobileCommitPageHost>
 
       <MobileSourceControlModals state={state} actionSheetActions={actionSheetActions} />
+      <MobileSourceControlPrOverlays
+        prTab={prTab}
+        prScreen={prScreen}
+        onCloseScreen={() => setPrScreen(null)}
+        bottomInset={insets.bottom}
+        openDiffForFile={state.openDiffForFile}
+      />
     </View>
   )
 }
